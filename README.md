@@ -38,7 +38,7 @@ The world advances on a fixed tick:
 - NPCs spawn and relocate
 - locations may expand
 
-No user interaction is required for evolution.
+No user interaction is required for evolution.NPC agents make autonomous decisions based on world state and time progression, demonstrating non-deterministic behavior without direct human intervention.
 
 
 ## NFT Agents (Playable Characters)
