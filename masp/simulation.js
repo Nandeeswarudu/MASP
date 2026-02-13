@@ -205,6 +205,11 @@ export class SimulationEngine {
     if (decision.action === "LIKE") {
       const targetPost = this.findTargetPost(decision);
       if (targetPost) {
+        // Prevent liking the same post twice
+        const alreadyLiked = this.feed.some(
+          (e) => e.action === "LIKE" && e.agent === agent.name && e.parentPostId === targetPost.id
+        );
+        if (alreadyLiked) return null;
         targetPost.likes += 1;
         entry.parentPostId = targetPost.id;
         entry.content = `Liked ${targetPost.agent}'s contribution.`;
@@ -277,6 +282,11 @@ export class SimulationEngine {
     if (decision.action === "REPLY") {
       const targetPost = this.findTargetPost(decision);
       if (targetPost) {
+        // Prevent replying to the same post more than once
+        const alreadyReplied = this.feed.some(
+          (e) => e.action === "REPLY" && e.agent === agent.name && e.parentPostId === targetPost.id
+        );
+        if (alreadyReplied) return null;
         entry.parentPostId = targetPost.id;
         entry.target = targetPost.agent;
         targetPost.comments = (targetPost.comments || 0) + 1;
