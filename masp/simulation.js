@@ -23,16 +23,23 @@ export class SimulationEngine {
     this.interval = null;
     this.vouches = new Map();
 
-    // Load state from DB immediately
-    this.loadState();
+    // Load state from DB immediately (async)
+    console.log("SimulationEngine: Initializing...");
+    this.loadState().then(() => {
+      console.log("SimulationEngine: Initial load complete.");
+    }).catch(err => {
+      console.error("SimulationEngine: Error in initial load:", err);
+    });
   }
 
   async loadState() {
     try {
       if (!process.env.MONGODB_URI) {
-        console.warn("No MONGODB_URI, skipping DB load.");
+        console.warn("SimulationEngine: No MONGODB_URI, skipping DB load.");
         return;
       }
+
+      console.log("SimulationEngine: Fetching state from MongoDB...");
 
       // 1. Load Global State
       const state = await SimulationState.findOne({ key: "global" });
@@ -40,7 +47,6 @@ export class SimulationEngine {
         this.stepCount = state.stepCount;
         this.totalAccusations = state.totalAccusations;
         if (state.vouches) {
-          // Mongoose Map -> JS Map
           this.vouches = state.vouches;
         }
       }
@@ -75,13 +81,12 @@ export class SimulationEngine {
         }
         if (agent) {
           agent.reputation = doc.reputation;
-          // We don't persist nextActionAt, so they will be scheduled on next tick
         }
         return agent;
       }).filter(Boolean);
 
       // 3. Load Feed (Last 100 items for context)
-      const feedDocs = await FeedItem.find({}).sort({ id: 1 }); // Load all or limit?
+      const feedDocs = await FeedItem.find({}).sort({ id: 1 }).limit(500);
       this.feed = feedDocs.map(doc => ({
         id: doc.id,
         timestamp: doc.timestamp.toISOString(),
@@ -103,9 +108,9 @@ export class SimulationEngine {
         _viewedBy: new Set(doc._viewedBy || [])
       }));
 
-      console.log(`Loaded ${this.agents.length} agents and ${this.feed.length} posts from MongoDB.`);
+      console.log(`SimulationEngine: Loaded ${this.agents.length} agents and ${this.feed.length} posts from MongoDB.`);
     } catch (err) {
-      console.error("Failed to load simulation state from DB:", err);
+      console.error("SimulationEngine: Failed to load simulation state from DB:", err);
     }
   }
 
@@ -122,7 +127,7 @@ export class SimulationEngine {
         { upsert: true }
       );
     } catch (err) {
-      console.error("Failed to save global state:", err);
+      console.error("SimulationEngine: Failed to save global state:", err);
     }
   }
 
@@ -133,11 +138,10 @@ export class SimulationEngine {
         { name: agent.name },
         {
           reputation: agent.reputation,
-          // Update other mutable fields if needed
         }
       );
     } catch (err) {
-      console.error(`Failed to save agent ${agent.name}:`, err);
+      console.error(`SimulationEngine: Failed to save agent ${agent.name}:`, err);
     }
   }
 
@@ -152,7 +156,7 @@ export class SimulationEngine {
         ...extraData
       });
     } catch (err) {
-      console.error(`Failed to create agent ${agent.name} in DB:`, err);
+      console.error(`SimulationEngine: Failed to create agent ${agent.name} in DB:`, err);
     }
   }
 
@@ -165,7 +169,7 @@ export class SimulationEngine {
         _viewedBy: Array.from(item._viewedBy || [])
       });
     } catch (err) {
-      console.error("Failed to save feed item:", err);
+      console.error("SimulationEngine: Failed to save feed item:", err);
     }
   }
 
@@ -182,7 +186,7 @@ export class SimulationEngine {
         }
       );
     } catch (err) {
-      console.error("Failed to update feed item stats:", err);
+      console.error("SimulationEngine: Failed to update feed item stats:", err);
     }
   }
 
@@ -212,7 +216,6 @@ export class SimulationEngine {
     this.totalAccusations = 0;
     if (process.env.MONGODB_URI) {
       await FeedItem.deleteMany({});
-      // Reset global state
       await this.saveGlobalState();
     }
   }
@@ -222,11 +225,11 @@ export class SimulationEngine {
     const toRemove = this.feed.filter((p) => (p.reasoning || "").toLowerCase().includes("fallback decision used"));
     this.feed = this.feed.filter((p) => !(p.reasoning || "").toLowerCase().includes("fallback decision used"));
 
-    // Remove from DB? This is expensive if many.
-    // For now we just remove from memory. If restarting, they might reappear unless we iterate and delete.
     if (toRemove.length > 0 && process.env.MONGODB_URI) {
       const ids = toRemove.map(i => i.id);
-      FeedItem.deleteMany({ id: { $in: ids } }).catch(console.error);
+      FeedItem.deleteMany({ id: { $in: ids } }).catch(err => {
+        console.error("SimulationEngine: Failed to remove fallback entries from DB:", err);
+      });
     }
     return before - this.feed.length;
   }
@@ -295,8 +298,6 @@ export class SimulationEngine {
           txHash: result.txHash,
           timestamp: nowIso()
         });
-        // We aren't persisting chainEvents to DB yet, maybe we should add a ChainEvent schema?
-        // For now, it's fine.
       }
       return result;
     } catch (error) {
@@ -315,7 +316,6 @@ export class SimulationEngine {
   }
 
   buildContextFor(agent) {
-    // Track impressions: each agent "views" the recent posts
     const recentPosts = this.feed.slice(-20);
     for (const post of recentPosts) {
       if (post.action === "POST" && post.agent !== agent.name) {
@@ -323,7 +323,6 @@ export class SimulationEngine {
         if (!post._viewedBy.has(agent.name)) {
           post._viewedBy.add(agent.name);
           post.views = (post.views || 0) + 1;
-          // Update view count in DB asynchronously
           this.updateFeedItemStats(post);
         }
       }
@@ -389,7 +388,8 @@ export class SimulationEngine {
       likes: 0,
       comments: 0,
       views: 0,
-      accusationCount: 0
+      accusationCount: 0,
+      _viewedBy: new Set()
     };
 
     if (decision.action === "LIKE") {
@@ -402,7 +402,7 @@ export class SimulationEngine {
         if (alreadyLiked) return null;
 
         targetPost.likes += 1;
-        this.updateFeedItemStats(targetPost); // Update like count in DB
+        this.updateFeedItemStats(targetPost);
 
         entry.parentPostId = targetPost.id;
         entry.content = `Liked ${targetPost.agent}'s contribution.`;
@@ -412,7 +412,7 @@ export class SimulationEngine {
           postAuthor.reputation += 2;
           this.vouches.set(vouchKey, true);
           await this.saveAgent(postAuthor);
-          await this.saveGlobalState(); // Save vouches map
+          await this.saveGlobalState();
         }
       } else {
         return null;
@@ -425,17 +425,9 @@ export class SimulationEngine {
         if (chainResult?.txHash) {
           entry.chainTxHash = chainResult.txHash;
           entry.chainContentHash = chainResult.hash;
-          this.chainEvents.push({
-            type: "RECORD_POST",
-            agent: agent.name,
-            wallet: agent.walletAddress,
-            txHash: chainResult.txHash,
-            contentHash: chainResult.hash,
-            timestamp: nowIso()
-          });
         }
-      } catch {
-        // chain fail
+      } catch (err) {
+        console.error("SimulationEngine: Blockchain record post failed:", err);
       }
     }
 
@@ -445,7 +437,7 @@ export class SimulationEngine {
         entry.target = targetAgent.name;
         entry.accusationCount = 1;
         this.totalAccusations += 1;
-        await this.saveGlobalState(); // Update totalAccusations
+        await this.saveGlobalState();
 
         const slash = Math.max(1, Math.floor(agent.reputation / 10));
         targetAgent.reputation -= slash;
@@ -459,17 +451,9 @@ export class SimulationEngine {
           );
           if (chainResult?.txHash) {
             entry.chainTxHash = chainResult.txHash;
-            this.chainEvents.push({
-              type: "ACCUSE_AGENT",
-              agent: agent.name,
-              target: targetAgent.name,
-              wallet: agent.walletAddress,
-              txHash: chainResult.txHash,
-              timestamp: nowIso()
-            });
           }
-        } catch {
-          // chain fail
+        } catch (err) {
+          console.error("SimulationEngine: Blockchain accuse failed:", err);
         }
       } else {
         entry.action = "POST";
@@ -488,7 +472,7 @@ export class SimulationEngine {
         entry.parentPostId = targetPost.id;
         entry.target = targetPost.agent;
         targetPost.comments = (targetPost.comments || 0) + 1;
-        this.updateFeedItemStats(targetPost); // Update comment count
+        this.updateFeedItemStats(targetPost);
 
         const vouchKey = `${agent.name}->${targetPost.agent}`;
         const postAuthor = this.agents.find((a) => a.name === targetPost.agent);
@@ -513,7 +497,6 @@ export class SimulationEngine {
       this.feed.shift();
     }
 
-    // Save the new action to DB
     await this.saveFeedItem(entry);
 
     return entry;
@@ -551,14 +534,14 @@ export class SimulationEngine {
   start(intervalMs = 15000) {
     if (this.running) return;
     this.running = true;
-    this.step().catch(() => {
-      // Initial autonomous attempt.
+    this.step().catch(err => {
+      console.error("SimulationEngine: Error in first step:", err);
     });
     this.interval = setInterval(async () => {
       try {
         await this.step();
-      } catch {
-        // Avoid crashing interval loop.
+      } catch (err) {
+        console.error("SimulationEngine: Error in step interval:", err);
       }
     }, intervalMs);
   }

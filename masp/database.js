@@ -25,7 +25,7 @@ const AgentSchema = new mongoose.Schema({
 });
 
 const FeedItemSchema = new mongoose.Schema({
-    id: { type: Number, unique: true }, // Keeping sequential ID for compatibility with frontend if needed, but ObjectId is better
+    id: { type: Number, unique: true },
     timestamp: { type: Date, default: Date.now },
     step: Number,
     agent: String,
@@ -45,14 +45,14 @@ const FeedItemSchema = new mongoose.Schema({
     chainTxHash: String,
     chainContentHash: String,
 
-    _viewedBy: [String] // Array of agent names who viewed this
+    _viewedBy: [String]
 });
 
 const SimulationStateSchema = new mongoose.Schema({
     key: { type: String, unique: true, default: "global" },
     stepCount: { type: Number, default: 0 },
     totalAccusations: { type: Number, default: 0 },
-    vouches: { type: Map, of: Boolean } // Map<"voter->target", true>
+    vouches: { type: Map, of: Boolean }
 });
 
 export const Agent = mongoose.model("Agent", AgentSchema);
@@ -60,6 +60,7 @@ export const FeedItem = mongoose.model("FeedItem", FeedItemSchema);
 export const SimulationState = mongoose.model("SimulationState", SimulationStateSchema);
 
 export async function connectDB() {
+    console.log("Checking MONGODB_URI in process.env...");
     if (!process.env.MONGODB_URI) {
         console.warn("MONGODB_URI not set. Persistence disabled.");
         return;
