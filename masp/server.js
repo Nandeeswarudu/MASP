@@ -7,9 +7,13 @@ import { BlockchainClient } from "./blockchain.js";
 import { MASP_PROTOCOL_VERSION, probeExternalEndpoint } from "./agent-engine.js";
 import { PERSONALITIES, STRATEGIES } from "./personalities.js";
 import { SimulationEngine } from "./simulation.js";
+import { connectDB } from "./database.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Connect to MongoDB
+connectDB();
 
 const app = express();
 const allowedOrigins = (process.env.CORS_ORIGINS || "")

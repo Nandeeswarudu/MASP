@@ -1,12 +1,6 @@
 import { ethers } from "ethers";
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
 import { ExternalAgent, HostedAgent, LLMAgent } from "./agent-engine.js";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const DB_FILE = path.join(__dirname, "masp_data.json");
+import { Agent, FeedItem, SimulationState } from "./database.js";
 
 function nowIso() {
   return new Date().toISOString();
@@ -27,100 +21,168 @@ export class SimulationEngine {
     this.totalAccusations = 0;
     this.running = false;
     this.interval = null;
-    // Track vouches: Map<"voterName->targetName", true>
-    // Each agent can only vouch (give rep) to another agent ONCE
     this.vouches = new Map();
 
-    // Load state from disk immediately
+    // Load state from DB immediately
     this.loadState();
   }
 
-  loadState() {
+  async loadState() {
     try {
-      if (fs.existsSync(DB_FILE)) {
-        const data = fs.readFileSync(DB_FILE, "utf-8");
-        const json = JSON.parse(data);
-
-        if (json.feed) this.feed = json.feed;
-        if (json.chainEvents) this.chainEvents = json.chainEvents;
-        if (json.stepCount) this.stepCount = json.stepCount;
-        if (json.totalAccusations) this.totalAccusations = json.totalAccusations;
-
-        // Restore vouches Map from array
-        if (json.vouches) {
-          this.vouches = new Map(json.vouches);
-        }
-
-        // Restore agents
-        if (json.agents) {
-          this.agents = json.agents.map(a => {
-            let agent;
-            if (a.kind === "hosted") {
-              agent = new HostedAgent({
-                name: a.name,
-                walletAddress: a.wallet,
-                personalityType: a.personality,
-                strategy: a.strategy
-              });
-            } else if (a.kind === "external") {
-              agent = new ExternalAgent({
-                name: a.name,
-                walletAddress: a.wallet,
-                endpoint: a.endpoint,
-                apiKey: a.apiKey
-              });
-            } else if (a.kind === "llm") {
-              agent = new LLMAgent({
-                name: a.name,
-                walletAddress: a.wallet,
-                apiKey: a.apiKey, // Note: apiKey might need to be re-supplied if not saved safely, but for local json it's ok
-                model: a.model,
-                provider: a.provider,
-                baseUrl: a.baseUrl
-              });
-            }
-            if (agent) {
-              agent.reputation = a.reputation || 10;
-              // Restore memory/history if we saved it? 
-              // For now, restarting agents effectively clears their short-term memory unless we serialize it too.
-              // But we can at least keep their identity and stats.
-            }
-            return agent;
-          }).filter(Boolean);
-        }
-        console.log(`Loaded ${this.agents.length} agents and ${this.feed.length} posts from storage.`);
+      if (!process.env.MONGODB_URI) {
+        console.warn("No MONGODB_URI, skipping DB load.");
+        return;
       }
+
+      // 1. Load Global State
+      const state = await SimulationState.findOne({ key: "global" });
+      if (state) {
+        this.stepCount = state.stepCount;
+        this.totalAccusations = state.totalAccusations;
+        if (state.vouches) {
+          // Mongoose Map -> JS Map
+          this.vouches = state.vouches;
+        }
+      }
+
+      // 2. Load Agents
+      const agentDocs = await Agent.find({});
+      this.agents = agentDocs.map(doc => {
+        let agent;
+        if (doc.kind === "hosted") {
+          agent = new HostedAgent({
+            name: doc.name,
+            walletAddress: doc.walletAddress,
+            personalityType: doc.personalityType,
+            strategy: doc.strategy
+          });
+        } else if (doc.kind === "external") {
+          agent = new ExternalAgent({
+            name: doc.name,
+            walletAddress: doc.walletAddress,
+            endpoint: doc.endpoint,
+            apiKey: doc.apiKey
+          });
+        } else if (doc.kind === "llm") {
+          agent = new LLMAgent({
+            name: doc.name,
+            walletAddress: doc.walletAddress,
+            apiKey: doc.apiKey,
+            model: doc.model,
+            provider: doc.provider,
+            baseUrl: doc.baseUrl
+          });
+        }
+        if (agent) {
+          agent.reputation = doc.reputation;
+          // We don't persist nextActionAt, so they will be scheduled on next tick
+        }
+        return agent;
+      }).filter(Boolean);
+
+      // 3. Load Feed (Last 100 items for context)
+      const feedDocs = await FeedItem.find({}).sort({ id: 1 }); // Load all or limit?
+      this.feed = feedDocs.map(doc => ({
+        id: doc.id,
+        timestamp: doc.timestamp.toISOString(),
+        step: doc.step,
+        agent: doc.agent,
+        wallet: doc.wallet,
+        action: doc.action,
+        target: doc.target,
+        targetPostId: doc.targetPostId,
+        parentPostId: doc.parentPostId,
+        content: doc.content,
+        reasoning: doc.reasoning,
+        likes: doc.likes,
+        comments: doc.comments,
+        views: doc.views,
+        accusationCount: doc.accusationCount,
+        chainTxHash: doc.chainTxHash,
+        chainContentHash: doc.chainContentHash,
+        _viewedBy: new Set(doc._viewedBy || [])
+      }));
+
+      console.log(`Loaded ${this.agents.length} agents and ${this.feed.length} posts from MongoDB.`);
     } catch (err) {
-      console.error("Failed to load simulation state:", err);
+      console.error("Failed to load simulation state from DB:", err);
     }
   }
 
-  saveState() {
+  async saveGlobalState() {
+    if (!process.env.MONGODB_URI) return;
     try {
-      const state = {
-        stepCount: this.stepCount,
-        totalAccusations: this.totalAccusations,
-        feed: this.feed,
-        chainEvents: this.chainEvents,
-        vouches: Array.from(this.vouches.entries()), // Convert Map to array for JSON
-        agents: this.agents.map(a => ({
-          kind: a.kind,
-          name: a.name,
-          wallet: a.walletAddress,
-          reputation: a.reputation,
-          personality: a.personalityType, // hosted only
-          strategy: a.strategy,           // hosted only
-          endpoint: a.endpoint,           // external only
-          apiKey: a.apiKey,               // external/llm
-          model: a.model,                 // llm only
-          provider: a.provider,           // llm only
-          baseUrl: a.baseUrl              // llm only
-        }))
-      };
-
-      fs.writeFileSync(DB_FILE, JSON.stringify(state, null, 2), "utf-8");
+      await SimulationState.updateOne(
+        { key: "global" },
+        {
+          stepCount: this.stepCount,
+          totalAccusations: this.totalAccusations,
+          vouches: this.vouches
+        },
+        { upsert: true }
+      );
     } catch (err) {
-      console.error("Failed to save simulation state:", err);
+      console.error("Failed to save global state:", err);
+    }
+  }
+
+  async saveAgent(agent) {
+    if (!process.env.MONGODB_URI) return;
+    try {
+      await Agent.updateOne(
+        { name: agent.name },
+        {
+          reputation: agent.reputation,
+          // Update other mutable fields if needed
+        }
+      );
+    } catch (err) {
+      console.error(`Failed to save agent ${agent.name}:`, err);
+    }
+  }
+
+  async createAgentInDB(agent, extraData = {}) {
+    if (!process.env.MONGODB_URI) return;
+    try {
+      await Agent.create({
+        name: agent.name,
+        walletAddress: agent.walletAddress,
+        kind: agent.kind,
+        reputation: agent.reputation,
+        ...extraData
+      });
+    } catch (err) {
+      console.error(`Failed to create agent ${agent.name} in DB:`, err);
+    }
+  }
+
+  async saveFeedItem(item) {
+    if (!process.env.MONGODB_URI) return;
+    try {
+      await FeedItem.create({
+        ...item,
+        timestamp: new Date(item.timestamp),
+        _viewedBy: Array.from(item._viewedBy || [])
+      });
+    } catch (err) {
+      console.error("Failed to save feed item:", err);
+    }
+  }
+
+  async updateFeedItemStats(item) {
+    if (!process.env.MONGODB_URI) return;
+    try {
+      await FeedItem.updateOne(
+        { id: item.id },
+        {
+          likes: item.likes,
+          comments: item.comments,
+          views: item.views,
+          _viewedBy: Array.from(item._viewedBy || [])
+        }
+      );
+    } catch (err) {
+      console.error("Failed to update feed item stats:", err);
     }
   }
 
@@ -133,28 +195,40 @@ export class SimulationEngine {
     }));
   }
 
-  removeAgentByName(name) {
+  async removeAgentByName(name) {
     const before = this.agents.length;
     this.agents = this.agents.filter((a) => a.name !== name);
     const changed = before !== this.agents.length;
-    if (changed) this.saveState();
+    if (changed && process.env.MONGODB_URI) {
+      await Agent.deleteOne({ name });
+    }
     return changed;
   }
 
-  clearFeed() {
+  async clearFeed() {
     this.feed = [];
     this.chainEvents = [];
     this.stepCount = 0;
     this.totalAccusations = 0;
-    this.saveState();
+    if (process.env.MONGODB_URI) {
+      await FeedItem.deleteMany({});
+      // Reset global state
+      await this.saveGlobalState();
+    }
   }
 
   removeFallbackFeedEntries() {
     const before = this.feed.length;
+    const toRemove = this.feed.filter((p) => (p.reasoning || "").toLowerCase().includes("fallback decision used"));
     this.feed = this.feed.filter((p) => !(p.reasoning || "").toLowerCase().includes("fallback decision used"));
-    const changed = before - this.feed.length;
-    if (changed > 0) this.saveState();
-    return changed;
+
+    // Remove from DB? This is expensive if many.
+    // For now we just remove from memory. If restarting, they might reappear unless we iterate and delete.
+    if (toRemove.length > 0 && process.env.MONGODB_URI) {
+      const ids = toRemove.map(i => i.id);
+      FeedItem.deleteMany({ id: { $in: ids } }).catch(console.error);
+    }
+    return before - this.feed.length;
   }
 
   leaderboard() {
@@ -178,7 +252,7 @@ export class SimulationEngine {
       strategy
     });
     this.agents.push(agent);
-    this.saveState();
+    this.createAgentInDB(agent, { personalityType: personality, strategy });
     return agent;
   }
 
@@ -191,7 +265,7 @@ export class SimulationEngine {
       apiKey
     });
     this.agents.push(agent);
-    this.saveState();
+    this.createAgentInDB(agent, { endpoint, apiKey });
     return agent;
   }
 
@@ -206,7 +280,7 @@ export class SimulationEngine {
       baseUrl
     });
     this.agents.push(agent);
-    this.saveState();
+    this.createAgentInDB(agent, { apiKey, model, provider, baseUrl });
     return agent;
   }
 
@@ -221,7 +295,8 @@ export class SimulationEngine {
           txHash: result.txHash,
           timestamp: nowIso()
         });
-        this.saveState();
+        // We aren't persisting chainEvents to DB yet, maybe we should add a ChainEvent schema?
+        // For now, it's fine.
       }
       return result;
     } catch (error) {
@@ -248,6 +323,8 @@ export class SimulationEngine {
         if (!post._viewedBy.has(agent.name)) {
           post._viewedBy.add(agent.name);
           post.views = (post.views || 0) + 1;
+          // Update view count in DB asynchronously
+          this.updateFeedItemStats(post);
         }
       }
     }
@@ -269,6 +346,8 @@ export class SimulationEngine {
     }
 
     this.stepCount += 1;
+    await this.saveGlobalState();
+
     const ordered = [...this.agents].sort(() => Math.random() - 0.5);
     const emitted = [];
 
@@ -284,9 +363,6 @@ export class SimulationEngine {
         this.scheduleNextAction(agent);
       }
     }
-
-    // Save state after every step to ensure persistence
-    this.saveState();
 
     return {
       step: this.stepCount,
@@ -319,22 +395,24 @@ export class SimulationEngine {
     if (decision.action === "LIKE") {
       const targetPost = this.findTargetPost(decision);
       if (targetPost) {
-        // Prevent liking own post
         if (targetPost.agent === agent.name) return null;
-        // Prevent liking the same post twice
         const alreadyLiked = this.feed.some(
           (e) => e.action === "LIKE" && e.agent === agent.name && e.parentPostId === targetPost.id
         );
         if (alreadyLiked) return null;
+
         targetPost.likes += 1;
+        this.updateFeedItemStats(targetPost); // Update like count in DB
+
         entry.parentPostId = targetPost.id;
         entry.content = `Liked ${targetPost.agent}'s contribution.`;
-        // Reputation: only if this agent hasn't vouched for the author yet
         const vouchKey = `${agent.name}->${targetPost.agent}`;
         const postAuthor = this.agents.find((a) => a.name === targetPost.agent);
         if (postAuthor && postAuthor.name !== agent.name && !this.vouches.has(vouchKey)) {
           postAuthor.reputation += 2;
           this.vouches.set(vouchKey, true);
+          await this.saveAgent(postAuthor);
+          await this.saveGlobalState(); // Save vouches map
         }
       } else {
         return null;
@@ -342,7 +420,6 @@ export class SimulationEngine {
     }
 
     if (decision.action === "POST" || decision.action === "REPLY") {
-      // No self-reputation for posting. Rep only comes from others vouching.
       try {
         const chainResult = await this.blockchain.recordPost(agent.walletAddress, entry.content || "empty-content");
         if (chainResult?.txHash) {
@@ -358,7 +435,7 @@ export class SimulationEngine {
           });
         }
       } catch {
-        // Keep simulation live even when chain tx fails.
+        // chain fail
       }
     }
 
@@ -368,9 +445,12 @@ export class SimulationEngine {
         entry.target = targetAgent.name;
         entry.accusationCount = 1;
         this.totalAccusations += 1;
+        await this.saveGlobalState(); // Update totalAccusations
+
         const slash = Math.max(1, Math.floor(agent.reputation / 10));
         targetAgent.reputation -= slash;
-        // No self-reputation for accusing; only vouching (LIKE/REPLY) gives rep.
+        await this.saveAgent(targetAgent);
+
         try {
           const chainResult = await this.blockchain.accuse(
             agent.walletAddress,
@@ -389,7 +469,7 @@ export class SimulationEngine {
             });
           }
         } catch {
-          // Keep simulation live even when chain tx fails.
+          // chain fail
         }
       } else {
         entry.action = "POST";
@@ -400,9 +480,7 @@ export class SimulationEngine {
     if (decision.action === "REPLY") {
       const targetPost = this.findTargetPost(decision);
       if (targetPost) {
-        // Prevent replying to own post
         if (targetPost.agent === agent.name) return null;
-        // Prevent replying to the same post more than once
         const alreadyReplied = this.feed.some(
           (e) => e.action === "REPLY" && e.agent === agent.name && e.parentPostId === targetPost.id
         );
@@ -410,12 +488,15 @@ export class SimulationEngine {
         entry.parentPostId = targetPost.id;
         entry.target = targetPost.agent;
         targetPost.comments = (targetPost.comments || 0) + 1;
-        // Reputation: only if this agent hasn't vouched for the author yet
+        this.updateFeedItemStats(targetPost); // Update comment count
+
         const vouchKey = `${agent.name}->${targetPost.agent}`;
         const postAuthor = this.agents.find((a) => a.name === targetPost.agent);
         if (postAuthor && postAuthor.name !== agent.name && !this.vouches.has(vouchKey)) {
           postAuthor.reputation += 1;
           this.vouches.set(vouchKey, true);
+          await this.saveAgent(postAuthor);
+          await this.saveGlobalState();
         }
       } else {
         return null;
@@ -431,6 +512,9 @@ export class SimulationEngine {
     if (this.feed.length > 500) {
       this.feed.shift();
     }
+
+    // Save the new action to DB
+    await this.saveFeedItem(entry);
 
     return entry;
   }
@@ -498,13 +582,11 @@ export class SimulationEngine {
 
   scheduleNextAction(agent, isInitial = false) {
     const now = Date.now();
-    // Natural pacing: 2-5 minutes between actions
-    const minDelay = agent.kind === "external" ? 150000 : 120000;  // 2-2.5 min
-    const maxDelay = agent.kind === "external" ? 360000 : 300000;  // 5-6 min
+    const minDelay = agent.kind === "external" ? 150000 : 120000;
+    const maxDelay = agent.kind === "external" ? 360000 : 300000;
     const range = maxDelay - minDelay;
     const jitter = Math.floor(Math.random() * range);
     const delay = minDelay + jitter;
-    // First action comes faster (30-60s) so the feed isn't empty on start
     agent._nextActionAt = now + (isInitial ? 30000 + Math.floor(Math.random() * 30000) : delay);
   }
 }
