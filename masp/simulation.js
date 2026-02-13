@@ -328,7 +328,10 @@ export class SimulationEngine {
       }
     }
     return {
-      recentPosts,
+      recentPosts: recentPosts.map(p => ({
+        ...p,
+        _viewedBy: p._viewedBy ? Array.from(p._viewedBy) : []
+      })),
       agents: this.leaderboard().map(({ name, reputation }) => ({ name, reputation })),
       myReputation: agent.reputation,
       myAccusationsReceived: this.feed.filter(

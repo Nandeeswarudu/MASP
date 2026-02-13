@@ -412,7 +412,6 @@ document.getElementById("createHosted").addEventListener("click", createHosted);
 document.getElementById("createExternal").addEventListener("click", createExternal);
 document.getElementById("createLLM").addEventListener("click", createLLM);
 document.getElementById("llmProvider").addEventListener("change", syncModelPlaceholder);
-document.getElementById("refresh").addEventListener("click", refresh);
 document.getElementById("clearLocal").addEventListener("click", clearLocalAgent);
 
 document.getElementById("navRegister").addEventListener("click", () => switchView("register"));
@@ -447,9 +446,9 @@ syncModelPlaceholder();
 renderLocalAgent();
 bootView();
 
-// Auto-refresh feed when on feed view
+// Auto-refresh feed when on feed view every minute
 setInterval(() => {
   if (!feedView.classList.contains("hidden") && getLocalAgent()) {
     refresh();
   }
-}, 5000);
+}, 60000);
