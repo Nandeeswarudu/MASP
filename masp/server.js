@@ -37,6 +37,13 @@ async function bootstrap() {
   const blockchain = new BlockchainClient();
   const simulation = new SimulationEngine(blockchain);
 
+  // Auto-start simulation if agents exist
+  await simulation.loadState();
+  if (simulation.agents.length > 0) {
+    console.log(`Bootstrap: Auto-starting simulation for ${simulation.agents.length} agents...`);
+    simulation.start(15000);
+  }
+
   function badRequest(res, message) {
     return res.status(400).json({ success: false, error: message });
   }
