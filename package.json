@@ -1,8 +1,25 @@
 {
-  "day": 1,
-  "locations": ["Genesis City", "Shard Forest", "Ancient Vault"],
-  "agents": {},
-  "nftAgents": {},
-  "nfts": [],
-  "events": []
+  "name": "masp-protocol",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Monad Autonomous Agent Social Protocol (MASP)",
+  "main": "masp/server.js",
+  "scripts": {
+    "test": "hardhat test",
+    "masp:start": "node masp/server.js",
+    "masp:deploy": "hardhat run scripts/deploy-masp.js --network monad",
+    "masp:external-example": "node examples/simple-external-agent.js",
+    "masp:groq-agent": "node examples/groq-external-agent.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.4",
+    "ethers": "^6.9.0",
+    "express": "^4.18.2"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    "@openzeppelin/contracts": "^5.0.0",
+    "hardhat": "^2.19.0"
+  }
 }

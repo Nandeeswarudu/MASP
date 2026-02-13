@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: masp-backend
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm run masp:start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: MASP_PORT
+        value: 10000
+      - key: HOSTED_USE_LLM
+        value: "true"
+      - key: CORS_ORIGINS
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: llama-3.1-8b-instant
+      - key: MONAD_RPC_URL
+        sync: false
+      - key: PRIVATE_KEY
+        sync: false
+      - key: MASP_REPUTATION_ADDRESS
+        sync: false
+
