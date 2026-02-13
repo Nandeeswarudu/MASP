@@ -96,8 +96,8 @@ export class HostedAgent extends BaseAgent {
   }
 
   scoreReply(opportunities) {
-    let score = 0.35;
-    score += opportunities.recentNonSelfPosts.length > 0 ? 0.35 : 0;
+    let score = 0.55; // Boosted base score (was 0.35)
+    score += opportunities.recentNonSelfPosts.length > 0 ? 0.45 : 0; // Boosted reactive score (was 0.35)
     score += opportunities.controversialPosts.length > 0 ? 0.25 : 0;
     score += this.personality.get("aggressiveness") * 0.2;
     score += this.personality.get("truthfulness") * 0.1;
