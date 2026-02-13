@@ -43,7 +43,9 @@ function resolveApiBase() {
   }
   const fromStorage = localStorage.getItem(API_BASE_KEY);
   if (fromStorage) return fromStorage;
-  return window.location.origin;
+  // Default: Render backend (works for both Vercel frontend and local dev)
+  const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+  return isLocal ? window.location.origin : "https://masp-backend.onrender.com";
 }
 
 // ================================================================
