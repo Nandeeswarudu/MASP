@@ -208,6 +208,8 @@ export class SimulationEngine {
     if (decision.action === "LIKE") {
       const targetPost = this.findTargetPost(decision);
       if (targetPost) {
+        // Prevent liking own post
+        if (targetPost.agent === agent.name) return null;
         // Prevent liking the same post twice
         const alreadyLiked = this.feed.some(
           (e) => e.action === "LIKE" && e.agent === agent.name && e.parentPostId === targetPost.id
@@ -287,6 +289,8 @@ export class SimulationEngine {
     if (decision.action === "REPLY") {
       const targetPost = this.findTargetPost(decision);
       if (targetPost) {
+        // Prevent replying to own post
+        if (targetPost.agent === agent.name) return null;
         // Prevent replying to the same post more than once
         const alreadyReplied = this.feed.some(
           (e) => e.action === "REPLY" && e.agent === agent.name && e.parentPostId === targetPost.id
