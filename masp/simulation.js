@@ -20,6 +20,9 @@ export class SimulationEngine {
     this.totalAccusations = 0;
     this.running = false;
     this.interval = null;
+    // Track vouches: Map<"voterName->targetName", true>
+    // Each agent can only vouch (give rep) to another agent ONCE
+    this.vouches = new Map();
   }
 
   listAgents() {
@@ -213,10 +216,12 @@ export class SimulationEngine {
         targetPost.likes += 1;
         entry.parentPostId = targetPost.id;
         entry.content = `Liked ${targetPost.agent}'s contribution.`;
-        // Reputation goes to the POST AUTHOR (vouched by liker)
+        // Reputation: only if this agent hasn't vouched for the author yet
+        const vouchKey = `${agent.name}->${targetPost.agent}`;
         const postAuthor = this.agents.find((a) => a.name === targetPost.agent);
-        if (postAuthor && postAuthor.name !== agent.name) {
+        if (postAuthor && postAuthor.name !== agent.name && !this.vouches.has(vouchKey)) {
           postAuthor.reputation += 2;
+          this.vouches.set(vouchKey, true);
         }
       } else {
         return null;
@@ -290,10 +295,12 @@ export class SimulationEngine {
         entry.parentPostId = targetPost.id;
         entry.target = targetPost.agent;
         targetPost.comments = (targetPost.comments || 0) + 1;
-        // Reputation goes to the POST AUTHOR (vouched by replier)
+        // Reputation: only if this agent hasn't vouched for the author yet
+        const vouchKey = `${agent.name}->${targetPost.agent}`;
         const postAuthor = this.agents.find((a) => a.name === targetPost.agent);
-        if (postAuthor && postAuthor.name !== agent.name) {
+        if (postAuthor && postAuthor.name !== agent.name && !this.vouches.has(vouchKey)) {
           postAuthor.reputation += 1;
+          this.vouches.set(vouchKey, true);
         }
       } else {
         return null;
@@ -376,12 +383,13 @@ export class SimulationEngine {
 
   scheduleNextAction(agent, isInitial = false) {
     const now = Date.now();
-    const agentCountFactor = this.agents.length <= 2 ? 1.45 : 1;
-    const minDelay = agent.kind === "external" ? 22000 : 18000;
-    const maxDelay = agent.kind === "external" ? 58000 : 48000;
+    // Natural pacing: 2-5 minutes between actions
+    const minDelay = agent.kind === "external" ? 150000 : 120000;  // 2-2.5 min
+    const maxDelay = agent.kind === "external" ? 360000 : 300000;  // 5-6 min
     const range = maxDelay - minDelay;
     const jitter = Math.floor(Math.random() * range);
-    const delay = Math.floor((minDelay + jitter) * agentCountFactor);
-    agent._nextActionAt = now + (isInitial ? Math.floor(delay * 0.4) : delay);
+    const delay = minDelay + jitter;
+    // First action comes faster (30-60s) so the feed isn't empty on start
+    agent._nextActionAt = now + (isInitial ? 30000 + Math.floor(Math.random() * 30000) : delay);
   }
 }
