@@ -1,5 +1,12 @@
 import { ethers } from "ethers";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 import { ExternalAgent, HostedAgent, LLMAgent } from "./agent-engine.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const DB_FILE = path.join(__dirname, "masp_data.json");
 
 function nowIso() {
   return new Date().toISOString();
@@ -23,6 +30,98 @@ export class SimulationEngine {
     // Track vouches: Map<"voterName->targetName", true>
     // Each agent can only vouch (give rep) to another agent ONCE
     this.vouches = new Map();
+
+    // Load state from disk immediately
+    this.loadState();
+  }
+
+  loadState() {
+    try {
+      if (fs.existsSync(DB_FILE)) {
+        const data = fs.readFileSync(DB_FILE, "utf-8");
+        const json = JSON.parse(data);
+
+        if (json.feed) this.feed = json.feed;
+        if (json.chainEvents) this.chainEvents = json.chainEvents;
+        if (json.stepCount) this.stepCount = json.stepCount;
+        if (json.totalAccusations) this.totalAccusations = json.totalAccusations;
+
+        // Restore vouches Map from array
+        if (json.vouches) {
+          this.vouches = new Map(json.vouches);
+        }
+
+        // Restore agents
+        if (json.agents) {
+          this.agents = json.agents.map(a => {
+            let agent;
+            if (a.kind === "hosted") {
+              agent = new HostedAgent({
+                name: a.name,
+                walletAddress: a.wallet,
+                personalityType: a.personality,
+                strategy: a.strategy
+              });
+            } else if (a.kind === "external") {
+              agent = new ExternalAgent({
+                name: a.name,
+                walletAddress: a.wallet,
+                endpoint: a.endpoint,
+                apiKey: a.apiKey
+              });
+            } else if (a.kind === "llm") {
+              agent = new LLMAgent({
+                name: a.name,
+                walletAddress: a.wallet,
+                apiKey: a.apiKey, // Note: apiKey might need to be re-supplied if not saved safely, but for local json it's ok
+                model: a.model,
+                provider: a.provider,
+                baseUrl: a.baseUrl
+              });
+            }
+            if (agent) {
+              agent.reputation = a.reputation || 10;
+              // Restore memory/history if we saved it? 
+              // For now, restarting agents effectively clears their short-term memory unless we serialize it too.
+              // But we can at least keep their identity and stats.
+            }
+            return agent;
+          }).filter(Boolean);
+        }
+        console.log(`Loaded ${this.agents.length} agents and ${this.feed.length} posts from storage.`);
+      }
+    } catch (err) {
+      console.error("Failed to load simulation state:", err);
+    }
+  }
+
+  saveState() {
+    try {
+      const state = {
+        stepCount: this.stepCount,
+        totalAccusations: this.totalAccusations,
+        feed: this.feed,
+        chainEvents: this.chainEvents,
+        vouches: Array.from(this.vouches.entries()), // Convert Map to array for JSON
+        agents: this.agents.map(a => ({
+          kind: a.kind,
+          name: a.name,
+          wallet: a.walletAddress,
+          reputation: a.reputation,
+          personality: a.personalityType, // hosted only
+          strategy: a.strategy,           // hosted only
+          endpoint: a.endpoint,           // external only
+          apiKey: a.apiKey,               // external/llm
+          model: a.model,                 // llm only
+          provider: a.provider,           // llm only
+          baseUrl: a.baseUrl              // llm only
+        }))
+      };
+
+      fs.writeFileSync(DB_FILE, JSON.stringify(state, null, 2), "utf-8");
+    } catch (err) {
+      console.error("Failed to save simulation state:", err);
+    }
   }
 
   listAgents() {
@@ -37,7 +136,9 @@ export class SimulationEngine {
   removeAgentByName(name) {
     const before = this.agents.length;
     this.agents = this.agents.filter((a) => a.name !== name);
-    return before !== this.agents.length;
+    const changed = before !== this.agents.length;
+    if (changed) this.saveState();
+    return changed;
   }
 
   clearFeed() {
@@ -45,12 +146,15 @@ export class SimulationEngine {
     this.chainEvents = [];
     this.stepCount = 0;
     this.totalAccusations = 0;
+    this.saveState();
   }
 
   removeFallbackFeedEntries() {
     const before = this.feed.length;
     this.feed = this.feed.filter((p) => !(p.reasoning || "").toLowerCase().includes("fallback decision used"));
-    return before - this.feed.length;
+    const changed = before - this.feed.length;
+    if (changed > 0) this.saveState();
+    return changed;
   }
 
   leaderboard() {
@@ -74,6 +178,7 @@ export class SimulationEngine {
       strategy
     });
     this.agents.push(agent);
+    this.saveState();
     return agent;
   }
 
@@ -86,6 +191,7 @@ export class SimulationEngine {
       apiKey
     });
     this.agents.push(agent);
+    this.saveState();
     return agent;
   }
 
@@ -100,6 +206,7 @@ export class SimulationEngine {
       baseUrl
     });
     this.agents.push(agent);
+    this.saveState();
     return agent;
   }
 
@@ -114,6 +221,7 @@ export class SimulationEngine {
           txHash: result.txHash,
           timestamp: nowIso()
         });
+        this.saveState();
       }
       return result;
     } catch (error) {
@@ -176,6 +284,9 @@ export class SimulationEngine {
         this.scheduleNextAction(agent);
       }
     }
+
+    // Save state after every step to ensure persistence
+    this.saveState();
 
     return {
       step: this.stepCount,
