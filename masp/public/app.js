@@ -24,6 +24,12 @@ function setStatus(message, duration = 4000) {
   }
 }
 
+function getExplorerLink(txHash) {
+  if (!txHash) return null;
+  // This matches the backend blockchain.js
+  return `https://monad.socialscan.io/tx/${txHash}`;
+}
+
 async function api(path, options) {
   const response = await fetch(`${API_BASE}${path}`, options);
   const data = await response.json();
@@ -321,6 +327,11 @@ function renderFeed(feed) {
         <span>💬 ${post.commentsCount}</span>
         <span>❤️ ${post.likesCount}</span>
         <span>📊 ${post.views || 0}</span>
+        ${post.chainTxHash ? `
+          <a href="${getExplorerLink(post.chainTxHash)}" target="_blank" class="chain-link" title="View on Monad Explorer" onclick="event.stopPropagation()">
+            🔗 On-chain
+          </a>
+        ` : ""}
       </div>
     `;
     card.addEventListener("click", () => openThread(post.id));
@@ -349,6 +360,11 @@ function openThread(postId) {
       <div class="post-metrics" style="padding-top: 12px; border-top: 1px solid var(--line);">
         <span>💬 ${replies.length}</span>
         <span>❤️ ${likes}</span>
+        ${root.chainTxHash ? `
+          <a href="${getExplorerLink(root.chainTxHash)}" target="_blank" class="chain-link" title="View on Monad Explorer">
+            🔗 View on Monad Explorer
+          </a>
+        ` : ""}
       </div>
     </article>
     <div class="thread-replies">
@@ -393,14 +409,29 @@ function setFilter(filterId) {
 
 async function refresh() {
   try {
-    const [leaderboard, feed] = await Promise.all([
+    const [leaderboard, feed, state] = await Promise.all([
       api("/api/leaderboard"),
-      api("/api/feed?limit=200")
+      api("/api/feed?limit=200"),
+      api("/api/state")
     ]);
     renderLeaderboard(leaderboard.leaderboard);
     renderFeed(feed.feed);
+    updateOnchainStats(state.totalOnchainRecords);
   } catch (error) {
     console.error("Refresh error:", error);
+  }
+}
+
+function updateOnchainStats(count) {
+  const el = document.getElementById("onchainStats");
+  const countEl = document.getElementById("onchainCount");
+  if (!el || !countEl) return;
+
+  if (count > 0) {
+    el.classList.remove("hidden");
+    countEl.textContent = count.toLocaleString();
+  } else {
+    el.classList.add("hidden");
   }
 }
 

@@ -605,6 +605,67 @@ ul {
   opacity: 0;
 }
 
+.topbar nav {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.stat-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(138, 43, 226, 0.1);
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  color: var(--accent);
+  border: 1px solid rgba(138, 43, 226, 0.2);
+}
+
+.pulse {
+  width: 8px;
+  height: 8px;
+  background: #00ff88;
+  border-radius: 50%;
+  box-shadow: 0 0 0 #00ff88;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(0, 255, 136, 0.7);
+  }
+
+  70% {
+    box-shadow: 0 0 0 8px rgba(0, 255, 136, 0);
+  }
+
+  100% {
+    box-shadow: 0 0 0 0 rgba(0, 255, 136, 0);
+  }
+}
+
+.chain-link {
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: var(--accent);
+  text-decoration: none;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.chain-link:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+
+/* ================================================================
+   Feed Stream
+   ================================================================ */
 /* ================================================================
    RESPONSIVE
    ================================================================ */

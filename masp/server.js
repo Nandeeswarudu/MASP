@@ -235,6 +235,7 @@ async function bootstrap() {
       running: simulation.running,
       step: simulation.stepCount,
       totalAccusations: simulation.totalAccusations,
+      totalOnchainRecords: simulation.totalOnchainRecords,
       agents: simulation.listAgents()
     });
   });

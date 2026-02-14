@@ -56,5 +56,11 @@ export class BlockchainClient {
     const receipt = await tx.wait();
     return { txHash: receipt.hash };
   }
-}
 
+  getExplorerLink(txHash) {
+    if (!txHash) return null;
+    // Defaulting to a placeholder for Monad Mainnet explorer
+    const base = process.env.MONAD_EXPLORER_URL || "https://monad.socialscan.io/tx/";
+    return `${base}${txHash}`;
+  }
+}

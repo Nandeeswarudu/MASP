@@ -19,6 +19,7 @@ export class SimulationEngine {
     this.chainEvents = [];
     this.stepCount = 0;
     this.totalAccusations = 0;
+    this.totalOnchainRecords = 0;
     this.running = false;
     this.interval = null;
     this.vouches = new Map();
@@ -49,6 +50,7 @@ export class SimulationEngine {
         if (state.vouches) {
           this.vouches = state.vouches;
         }
+        this.totalOnchainRecords = state.totalOnchainRecords || 0;
       }
 
       // 2. Load Agents
@@ -122,6 +124,7 @@ export class SimulationEngine {
         {
           stepCount: this.stepCount,
           totalAccusations: this.totalAccusations,
+          totalOnchainRecords: this.totalOnchainRecords,
           vouches: this.vouches
         },
         { upsert: true }
@@ -298,6 +301,8 @@ export class SimulationEngine {
           txHash: result.txHash,
           timestamp: nowIso()
         });
+        this.totalOnchainRecords += 1;
+        await this.saveGlobalState();
       }
       return result;
     } catch (error) {
@@ -428,6 +433,8 @@ export class SimulationEngine {
         if (chainResult?.txHash) {
           entry.chainTxHash = chainResult.txHash;
           entry.chainContentHash = chainResult.hash;
+          this.totalOnchainRecords += 1;
+          await this.saveGlobalState();
         }
       } catch (err) {
         console.error("SimulationEngine: Blockchain record post failed:", err);
@@ -454,6 +461,8 @@ export class SimulationEngine {
           );
           if (chainResult?.txHash) {
             entry.chainTxHash = chainResult.txHash;
+            this.totalOnchainRecords += 1;
+            await this.saveGlobalState();
           }
         } catch (err) {
           console.error("SimulationEngine: Blockchain accuse failed:", err);

@@ -131,7 +131,7 @@ export class HostedAgent extends BaseAgent {
     };
 
     if (action === "POST") {
-      const topic = pickTopic(context, opportunities);
+      const topic = pickTopic(context, opportunities, this);
       const stance = sample([
         "signals weak coordination",
         "creates room for better incentives",
@@ -471,18 +471,18 @@ function analyzeOpportunities(context, selfName) {
 }
 
 const WORLD_TOPICS = [
-  "consumer social apps",
-  "creator monetization",
-  "ad-driven recommendation loops",
-  "ai content authenticity",
-  "onchain governance",
-  "stablecoin liquidity",
-  "restaking and shared security",
-  "wallet UX and account abstraction",
-  "agent-to-agent coordination",
-  "airdrops and incentive alignment",
-  "defi risk management",
-  "crypto market volatility"
+  "Monad testnet performance",
+  "parallel EVM execution",
+  "monad-db storage efficiency",
+  "community-led governance",
+  "on-chain identity and reputation",
+  "DeFi liquidity on Monad",
+  "NFT rarities and digital art",
+  "smart contract security audits",
+  "agent-to-agent negotiation",
+  "interoperability with other L1s",
+  "gasless transactions and account abstraction",
+  "MEV protection on Monad"
 ];
 
 function sample(arr) {
@@ -494,9 +494,15 @@ function capitalize(text) {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
-function pickTopic(context, opportunities) {
+function pickTopic(context, opportunities, agent) {
   const recentTopic = opportunities.trendingTopics[0];
-  if (recentTopic && Math.random() > 0.35) return recentTopic;
+  if (recentTopic && Math.random() > 0.6) return recentTopic;
+
+  const interests = agent?.personality?.params?.interests || [];
+  if (interests.length > 0 && Math.random() > 0.3) {
+    return sample(interests);
+  }
+
   const recentWords = context.recentPosts
     .map((p) => (p.content || "").toLowerCase())
     .join(" ");
@@ -543,7 +549,10 @@ async function decideHostedActionWithLLM({ agentName, context, opportunities, me
     .map((p) => ({ id: p.id, agent: p.agent, content: p.content }));
 
   const prompt = `
-You are ${agentName}, an autonomous social agent in a mixed web2/web3 timeline.
+You are ${agentName}, an autonomous social agent in the Monad ecosystem.
+Your personality: ${this.personality.params.description}
+Your interests: ${this.personality.params.interests.join(", ")}
+
 You must independently decide your next action.
 
 Return strict JSON only:
@@ -561,6 +570,7 @@ Rules:
 - Avoid repeating your own recent wording.
 - Prefer diversifying actions over time.
 - Ground replies in the referenced post content.
+- Use a tone consistent with your personality and interests.
 
 Recent timeline:
 ${JSON.stringify(recentFeed.map((p) => ({
@@ -665,7 +675,10 @@ async function generateHostedTextWithLLM({ agentName, action, context, targetPos
     .map((p) => p.content);
 
   const prompt = `
-You are ${agentName}, an autonomous social AI in a web2+web3 discussion feed.
+You are ${agentName}, an autonomous social AI in the Monad ecosystem.
+Your personality: ${this.personality.params.description}
+Your interests: ${this.personality.params.interests.join(", ")}
+
 Write natural, specific text and avoid generic phrases.
 Action: ${action}
 ${targetBlock}
@@ -680,7 +693,7 @@ Return JSON only:
   "reasoning": "string (max 180 chars)",
   "target_post_id": "integer when action is REPLY/LIKE/ACCUSE and target is known"
 }
-If REPLY, directly reference the target post idea.
+If REPLY, directly reference the target post idea. Mention Monad or specific interests if relevant to the context.
 `.trim();
 
   try {
@@ -766,7 +779,10 @@ function buildAutonomousLLMPrompt(agentName, context, memory) {
   const ranking = context.agents.slice(0, 8);
 
   return `
-You are ${agentName}, an autonomous agent in a social network simulation.
+You are ${agentName}, an autonomous agent in the Monad ecosystem.
+Your personality: ${context.agent_info?.personality?.description || "Unknown"}
+Your interests: ${(context.agent_info?.personality?.interests || []).join(", ")}
+
 Make your own decision from context. Do not use generic filler phrases.
 
 Recent timeline:
